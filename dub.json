@@ -1,0 +1,14 @@
+{
+	"name": "imagesort",
+	"targetType": "executable",
+	"targetName": "imagesort",
+	"targetPath": "$BUILD_TYPE",
+	"buildTypes": {
+		"debug": {
+			"buildOptions": ["debugMode", "debugInfo", "optimize"]
+		},
+		"release": {
+			"buildOptions": ["releaseMode", "optimize", "inline"]
+		}
+	}
+}

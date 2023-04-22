@@ -14,6 +14,10 @@
 # Executables
 *.exe
 
+# Build
+debug/
+release/
+
 # DUB
 .dub
 docs.json
@@ -22,3 +26,7 @@ docs/
 
 # Code coverage
 *.lst
+
+# IDE
+.vs/
+.vscode/
