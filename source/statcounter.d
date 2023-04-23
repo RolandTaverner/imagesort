@@ -1,6 +1,6 @@
 module stat;
 
-enum StatField { ExistingDirs, NewDirs, FilesToExistingDirs, FilesToNewDirs};
+enum StatField { ExistingDirs, NewDirs, FilesToExistingDirs, FilesToNewDirs, FilesProcessed, FilesSkipped, DupsRemoved }
 
 interface IStatCounter {
     void increment(const StatField f);

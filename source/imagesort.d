@@ -15,11 +15,13 @@ int main(string[] args)
     string srcDirStr = "";
     string dstDirStr = "";
     bool execute = false;
+    bool removeDups = false;
 
     auto optsResult = getopt(args,
                                 "src", &srcDirStr,   
                                 "dst", &dstDirStr,
-                                "do",  &execute);
+                                "do",  &execute,
+                                "rmdups", &removeDups);
 
     if (srcDirStr.length == 0 || dstDirStr.length == 0 || optsResult.helpWanted) {
 		defaultGetoptPrinter("Usage", optsResult.options);
@@ -44,6 +46,7 @@ int main(string[] args)
 
     Options opts;
     opts.execute = execute;
+    opts.removeDups = removeDups;
 
     StatCounter sc = new StatCounter();
     
@@ -61,17 +64,56 @@ int main(string[] args)
         if (fileDate == null) {
             continue;
         }
-        debug writeln("file date ", fileDate.toISOExtString(), e.name);
+        //debug writeln("file date ", fileDate.toISOExtString(), e.name);
 
         string dirToMove = dm.getOrCreateDir(*fileDate);
+        auto fileName = std.path.baseName(e.name);
+        string newFilePath = std.path.buildPath(dirToMove, fileName);
+        if (std.file.exists(newFilePath)) {
+            sc.increment(StatField.FilesSkipped);
+            writeln(newFilePath, " already exists");
+            if (opts.removeDups) {
+                sc.increment(StatField.DupsRemoved);
+                debug writeln("remove \"", e.name, "\"");
+                if (opts.execute) {
+                    std.file.remove(e.name);
+                }
+            }
+            continue;
+        }
+
+        debug writeln("copy \"", e.name, "\" \"", newFilePath, "\"");
+        try {
+            if (opts.execute) {
+                std.file.copy(e.name, newFilePath);
+            }
+        } catch (FileException ex) {
+            writeln("copy to ", newFilePath, " error: ", ex.message());
+            continue;
+        }
+        sc.increment(StatField.FilesProcessed);
+        
+        debug writeln("remove ", e.name);
+        try {
+            if (opts.execute) {
+                std.file.remove(e.name);
+            }
+        } catch (FileException ex) {
+            writeln("remove ", e.name, " error: ", ex.message());
+            continue;
+        }
     }
 
 
     // writeln(filesToExistingDirs + filesToNewDirs, " files found");
     writeln(sc.getValue(StatField.ExistingDirs), " dst dirs found");
     writeln(sc.getValue(StatField.NewDirs), " dst dirs created");
+    writeln(sc.getValue(StatField.FilesToExistingDirs) + sc.getValue(StatField.FilesToNewDirs), " total files found");
     writeln(sc.getValue(StatField.FilesToExistingDirs), " files moved to existing dirs");
     writeln(sc.getValue(StatField.FilesToNewDirs), " files moved to new dirs");
+    writeln(sc.getValue(StatField.FilesProcessed), " files processed");
+    writeln(sc.getValue(StatField.FilesSkipped), " files skipped");
+    writeln(sc.getValue(StatField.DupsRemoved), " duplicates removed");
 
     return 0;
 }
@@ -151,11 +193,12 @@ class DirectoryMapper {
 struct Options {
     bool execute = false;
     bool verbose = false;
+    bool removeDups = false;
 }
 
 
 Date *dateFromName(scope ref const DirEntry fileEntry) {
-    immutable static auto fileRegex = std.regex.regex(r"^(\d{8})_\d+\.\w+$");
+    immutable static auto fileRegex = std.regex.regex(r"^(\d{8})_.*\.\w+$");
     if (!fileEntry.isFile) {
         return null;
     }
