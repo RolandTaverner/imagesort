@@ -1,6 +1,6 @@
 module imagesort;
 
-import std.algorithm.comparison : cmp;
+
 import std.getopt;
 import std.stdio;
 import std.datetime.date;
@@ -8,20 +8,23 @@ import std.file;
 import std.path;
 import std.regex;
 
+import directorymapper;
+import options;
 import stat;
 
-int main(string[] args)
-{
+int main(string[] args) {
     string srcDirStr = "";
     string dstDirStr = "";
     bool execute = false;
     bool removeDups = false;
+    bool verbose = false;
 
     auto optsResult = getopt(args,
                                 "src", &srcDirStr,   
                                 "dst", &dstDirStr,
-                                "do",  &execute,
-                                "rmdups", &removeDups);
+                                "do", &execute,
+                                "rmdups", &removeDups,
+                                "verbose", &verbose);
 
     if (srcDirStr.length == 0 || dstDirStr.length == 0 || optsResult.helpWanted) {
 		defaultGetoptPrinter("Usage", optsResult.options);
@@ -47,34 +50,30 @@ int main(string[] args)
     Options opts;
     opts.execute = execute;
     opts.removeDups = removeDups;
+    opts.verbose = verbose;
 
     StatCounter sc = new StatCounter();
-    
     DirectoryMapper dm = new DirectoryMapper(dstDir, opts, sc);
-
-    uint filesToExistingDirs = 0;
-    uint filesToNewDirs = 0;
 
     foreach (DirEntry e; std.file.dirEntries(srcDir,  SpanMode.depth)) {
         if (!e.isFile) {
             continue;
         }
 
-        auto fileDate = dateFromName(e);
+        auto fileDate = dateFromName(e, opts);
         if (fileDate == null) {
             continue;
         }
-        //debug writeln("file date ", fileDate.toISOExtString(), e.name);
 
         string dirToMove = dm.getOrCreateDir(*fileDate);
         auto fileName = std.path.baseName(e.name);
         string newFilePath = std.path.buildPath(dirToMove, fileName);
         if (std.file.exists(newFilePath)) {
             sc.increment(StatField.FilesSkipped);
-            writeln(newFilePath, " already exists");
+            opts.verboseMsg((){ writeln(newFilePath, " already exists"); });
             if (opts.removeDups) {
                 sc.increment(StatField.DupsRemoved);
-                debug writeln("remove \"", e.name, "\"");
+                opts.verboseMsg((){ writeln("remove duplicate \"", e.name, "\""); });
                 if (opts.execute) {
                     std.file.remove(e.name);
                 }
@@ -82,7 +81,7 @@ int main(string[] args)
             continue;
         }
 
-        debug writeln("copy \"", e.name, "\" \"", newFilePath, "\"");
+        opts.verboseMsg((){ writeln("copy \"", e.name, "\" \"", newFilePath, "\""); });
         try {
             if (opts.execute) {
                 std.file.copy(e.name, newFilePath);
@@ -93,7 +92,7 @@ int main(string[] args)
         }
         sc.increment(StatField.FilesProcessed);
         
-        debug writeln("remove ", e.name);
+        opts.verboseMsg((){ writeln("remove ", e.name); });
         try {
             if (opts.execute) {
                 std.file.remove(e.name);
@@ -104,8 +103,7 @@ int main(string[] args)
         }
     }
 
-
-    // writeln(filesToExistingDirs + filesToNewDirs, " files found");
+    writeln("Summary:");
     writeln(sc.getValue(StatField.ExistingDirs), " dst dirs found");
     writeln(sc.getValue(StatField.NewDirs), " dst dirs created");
     writeln(sc.getValue(StatField.FilesToExistingDirs) + sc.getValue(StatField.FilesToNewDirs), " total files found");
@@ -118,86 +116,7 @@ int main(string[] args)
     return 0;
 }
 
-class DirectoryMapper {
-    private std.file.DirEntry dstDir;
-    private string[Date] existingDirMap;
-    private string[Date] newDirMap;
-    Options opts;
-    StatCounter statCounter;
-
-    this(const std.file.DirEntry dstDir, Options opts, StatCounter statCounter) {
-        this.dstDir = dstDir;
-        this.opts = opts;
-        this.statCounter = statCounter;
-        mapDstDir();
-    }
-
-    string getOrCreateDir(const Date d) {
-        const auto existingDir = d in existingDirMap;
-        if (existingDir != null) {
-            statCounter.increment(StatField.FilesToExistingDirs);
-            return *existingDir;
-        } 
-
-        statCounter.increment(StatField.FilesToNewDirs);
-        const auto newDir = d in newDirMap;
-        if (newDir != null) {
-            return *newDir;
-        } 
-        const auto newDirPath = std.path.buildPath(dstDir.name, d.toISOExtString());
-        if (opts.execute) {
-            std.file.mkdir(newDirPath);
-        }
-        statCounter.increment(StatField.NewDirs);
-        debug writeln("Created dir ", newDirPath);
-
-        newDirMap[d] = newDirPath;
-        return newDirPath;
-    }
-    
-
-    private void mapDstDir() {
-        immutable static auto dirRegex = std.regex.regex(r"^(\d{4}\-\d{2}\-\d{2}).*$");
-
-        foreach (DirEntry e; std.file.dirEntries(dstDir,  SpanMode.shallow)) {
-            if (!e.isDir) {
-                continue;
-            }
-            auto leaf = std.path.baseName(e.name);
-            auto dirMatch = std.regex.matchFirst(leaf, dirRegex);
-            if (dirMatch.empty) {
-                debug writeln(leaf, " not matched");
-                continue;
-            }
-            const string strDate = dirMatch[1];
-            Date dirDate;
-            
-            try dirDate = Date.fromISOExtString(strDate);
-            catch(DateTimeException d) continue;
-
-            auto existingPath = dirDate in existingDirMap;
-            if (existingPath is null) {
-                existingDirMap[dirDate] = e.name;
-                statCounter.increment(StatField.ExistingDirs);
-            } else {
-                if (cmp(e.name, *existingPath) < 0) {
-                    existingDirMap[dirDate] = e.name;
-                }
-            }
-            debug writeln(dirDate, " -> ", existingDirMap[dirDate]);
-        }
-    }
-
-}
-
-struct Options {
-    bool execute = false;
-    bool verbose = false;
-    bool removeDups = false;
-}
-
-
-Date *dateFromName(scope ref const DirEntry fileEntry) {
+Date *dateFromName(scope ref const DirEntry fileEntry, const ref Options opts) {
     immutable static auto fileRegex = std.regex.regex(r"^(\d{8})_.*\.\w+$");
     if (!fileEntry.isFile) {
         return null;
@@ -205,7 +124,7 @@ Date *dateFromName(scope ref const DirEntry fileEntry) {
 
     auto fileMatch = std.regex.matchFirst(std.path.baseName(fileEntry.name), fileRegex);
     if (fileMatch.empty) {
-        writeln("file ", fileEntry.name, " not matched");
+        opts.verboseMsg((){ writeln("file ", fileEntry.name, " not matched"); });
         return null;
     }
     const string dateExpr = fileMatch[1];
