@@ -9,6 +9,7 @@ import std.path;
 import std.regex;
 
 import directorymapper;
+import filedateextractor;
 import options;
 import stat;
 
@@ -60,8 +61,9 @@ int main(string[] args) {
             continue;
         }
 
-        auto fileDate = dateFromName(e, opts);
+        auto fileDate = extractFileDate(e);
         if (fileDate == null) {
+            opts.verboseMsg((){ writeln("file ", e.name, " not matched any date extractor"); });
             continue;
         }
 
@@ -114,25 +116,4 @@ int main(string[] args) {
     writeln(sc.getValue(StatField.DupsRemoved), " duplicates removed");
 
     return 0;
-}
-
-Date *dateFromName(scope ref const DirEntry fileEntry, const ref Options opts) {
-    immutable static auto fileRegex = std.regex.regex(r"^(\d{8})_.*\.\w+$");
-    if (!fileEntry.isFile) {
-        return null;
-    }
-
-    auto fileMatch = std.regex.matchFirst(std.path.baseName(fileEntry.name), fileRegex);
-    if (fileMatch.empty) {
-        opts.verboseMsg((){ writeln("file ", fileEntry.name, " not matched"); });
-        return null;
-    }
-    const string dateExpr = fileMatch[1];
-    const string strDate = dateExpr[0..4] ~ "-" ~ dateExpr[4..6] ~ "-" ~ dateExpr[6..8];
-    
-    Date *dirDate = new Date() ;
-    try *dirDate = Date.fromISOExtString(strDate);
-    catch(DateTimeException d) return null;
-
-    return dirDate;
 }
